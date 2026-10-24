@@ -1,0 +1,13 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: glow
+      POSTGRES_PASSWORD: glow
+      POSTGRES_DB: glow
+    ports:
+      - "5432:5432"
+    volumes:
+      - glowpg:/var/lib/postgresql/data
+volumes:
+  glowpg:
