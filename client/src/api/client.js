@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL || "";
+const BASE = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
 
 export function adminHeaders() {
   const pass = sessionStorage.getItem("glow-admin") || "";

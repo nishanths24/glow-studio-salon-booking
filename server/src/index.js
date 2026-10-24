@@ -9,8 +9,9 @@ const app = createApp();
 
 try {
   const { mode } = await initDb();
-  app.listen(config.port, () => {
-    console.log(`Glow Studio API on http://localhost:${config.port} (db: ${mode})`);
+  const host = "0.0.0.0";
+  app.listen(config.port, host, () => {
+    console.log(`Glow Studio API on http://${host}:${config.port} (db: ${mode})`);
   });
 } catch (err) {
   console.error("Failed to start", err);

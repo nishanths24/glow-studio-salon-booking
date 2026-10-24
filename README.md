@@ -257,25 +257,120 @@ npm run build
 
 ---
 
-## 9. Current Limitations & Production Deployment
+## 9. Production Deployment Guide (Vercel + Render + Supabase)
 
-### Current Assumptions & Limitations
-1. **Single-Chair Salon Model:** The salon operates on a single chair capacity (one appointment at any given time). Multi-chair parallel scheduling is not currently implemented.
-2. **Mock SMS Notifications:** Appointment confirmations and invoices are logged and displayed visually; an external SMS gateway (e.g., Twilio / Gupshup) is not configured in this standalone assignment.
-3. **Weekly Tuesday Closure:** Glow Studio is closed on Tuesdays as part of salon operating policy.
+### Target Architecture
+- **Frontend Hosting:** Vercel (Single Page App from `client/`)
+- **Backend API Hosting:** Render (Node.js Web Service from `server/`)
+- **Database:** Supabase (Hosted PostgreSQL)
 
-### Production Deployment Instructions
+---
 
-1. **Database (Neon / Supabase):**
-   - Create a PostgreSQL database instance.
-   - Obtain the connection URL (`postgresql://user:password@host/dbname?sslmode=require`).
-2. **Backend API (Render / Railway):**
-   - Set the root directory to `salon-booking/server`.
-   - Build command: `npm install`
-   - Start command: `node src/index.js`
-   - Set environment variables: `DATABASE_URL`, `ADMIN_PASSCODE`, `TZ=Asia/Kolkata`, `CORS_ORIGIN=https://your-frontend-domain.com`.
-3. **Frontend Application (Vercel / Netlify):**
-   - Set the root directory to `salon-booking/client`.
-   - Build command: `npm run build`
-   - Output directory: `dist`
-   - Set environment variable: `VITE_API_URL=https://your-backend-api.onrender.com`.
+### Step 1: Database Setup (Supabase PostgreSQL)
+
+1. **Create a Supabase Project:**
+   - Log into [Supabase](https://supabase.com) and create a new project.
+   - Choose a region geographically close to your users (e.g., `ap-south-1` Mumbai or `ap-southeast-1` Singapore).
+   - Set a strong database password and keep it safe.
+
+2. **Obtain the Connection Pooler String (Crucial for Render):**
+   > [!IMPORTANT]
+   > Free instances on Render only support **IPv4** outbound connections. Supabase direct connections (`db.[project-ref].supabase.co`) use IPv6 on free tiers. You **must** use the **Supabase Connection Pooler** URL to ensure smooth connectivity from Render.
+   - In Supabase, navigate to **Project Settings** $\rightarrow$ **Database** $\rightarrow$ **Connection Pooling**.
+   - Select **Mode:** `Transaction` (port `6543`) or `Session` (port `5432`).
+   - Copy the URI string formatted as:
+     ```text
+     postgresql://postgres.[project-ref]:[db-password]@aws-0-[region].pooler.supabase.com:6543/postgres?pgbouncer=true
+     ```
+   - Replace `[db-password]` with your actual Supabase database password.
+
+3. **Schema Initialization & Idempotent Seeding:**
+   - You do **not** need to manually run SQL scripts. On first boot, the server's `initDb()` automatically executes `server/db/schema.sql` to construct tables (`services`, `bookings`, `invoices`), applies the `uniq_active_slot` partial unique index, attempts the `btree_gist` overlap exclusion constraint, and idempotently seeds the 5 salon services.
+
+---
+
+### Step 2: Backend API Deployment (Render)
+
+1. **Create a New Web Service:**
+   - Log into [Render](https://render.com) and click **New +** $\rightarrow$ **Web Service**.
+   - Connect your GitHub repository: `https://github.com/nishanths24/glow-studio-salon-booking`.
+
+2. **Configure Service Settings:**
+   - **Name:** `glow-studio-api` (or your preferred name)
+   - **Region:** Pick a region close to your Supabase database.
+   - **Root Directory:** `server` *(Must be set to `server`)*
+   - **Runtime:** `Node`
+   - **Build Command:** `npm install`
+   - **Start Command:** `npm start` *(runs `node src/index.js`)*
+   - **Instance Type:** `Free`
+
+3. **Configure Environment Variables on Render:**
+   In the **Environment** tab, add the following variables using your placeholders:
+
+| Key | Example / Format Placeholder | Description |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://postgres.[project-ref]:[db-password]@aws-0-[region].pooler.supabase.com:6543/postgres?pgbouncer=true` | Supabase IPv4 connection pooler URI |
+| `ADMIN_PASSCODE` | `your-secure-admin-passcode-here` | Secret passcode for salon owner login & management |
+| `CORS_ORIGIN` | `https://your-frontend.vercel.app` | Allowed frontend origin (set after creating Vercel app) |
+| `TZ` | `Asia/Kolkata` | Required for correct salon operating hours & slot calculations |
+| `LLM_API_KEY` | *(Optional Gemini API Key)* | Optional Google Gemini key. If omitted, uses deterministic offline fallback |
+| `LLM_MODEL` | `gemini-2.0-flash` | LLM model identifier |
+
+*Note: Render automatically sets and injects `PORT`. Express is configured to bind to `0.0.0.0` and `process.env.PORT`.*
+
+4. **Deploy and Obtain API URL:**
+   - Click **Create Web Service**.
+   - Once deployed and healthy, copy the assigned URL: `https://[your-service-name].onrender.com`.
+
+---
+
+### Step 3: Frontend Deployment (Vercel)
+
+1. **Import Project to Vercel:**
+   - Log into [Vercel](https://vercel.com) and click **Add New...** $\rightarrow$ **Project**.
+   - Import your GitHub repository (`nishanths24/glow-studio-salon-booking`).
+
+2. **Configure Project Settings:**
+   - **Framework Preset:** `Vite`
+   - **Root Directory:** Click Edit and select `client` *(Must be set to `client`)*
+   - **Build Command:** `npm run build`
+   - **Output Directory:** `dist`
+   - **Install Command:** `npm install`
+
+3. **Configure Environment Variable on Vercel:**
+   In the **Environment Variables** section, add:
+
+| Key | Value Placeholder | Description |
+|---|---|---|
+| `VITE_API_URL` | `https://[your-service-name].onrender.com` | Full Render backend origin without trailing slash |
+
+4. **SPA Client Routing (`vercel.json`):**
+   - The repository includes [client/vercel.json](file:///c:/Users/nisha/OneDrive/Desktop/salon.md/salon-booking/client/vercel.json) with client-side rewrites to `/index.html`, ensuring routes like `/admin`, `/manage`, and `/confirmation/:id` resolve smoothly on direct navigation and refresh.
+
+5. **Deploy & Update CORS:**
+   - Click **Deploy**.
+   - Once deployed, copy your production Vercel domain (e.g., `https://your-frontend.vercel.app`).
+   - Return to your **Render** dashboard $\rightarrow$ **Environment** and update `CORS_ORIGIN` with your Vercel URL:
+     ```text
+     CORS_ORIGIN=https://your-frontend.vercel.app
+     ```
+   - Render will automatically re-deploy with updated CORS headers.
+
+---
+
+### Step 4: Post-Deployment Smoke Test Checklist
+
+- [ ] **Health Endpoint:** Open `https://[your-render-api].onrender.com/api/health` and verify `{"ok":true,"service":"glow-studio","tz":"Asia/Kolkata"}`.
+- [ ] **Catalog & Slot Engine:** Visit the Vercel frontend, select a service, and verify real available time slots load for tomorrow.
+- [ ] **Customer Booking:** Book an appointment through the UI or Mira chat widget, confirm the booking, and verify receipt of a booking reference ID.
+- [ ] **Admin Dashboard:** Navigate to `/admin`, log in with your configured `ADMIN_PASSCODE`, and confirm the newly booked appointment is visible on the schedule.
+- [ ] **Billing & Invoices:** Open the appointment, toggle GST, and verify invoice generation and printable view.
+- [ ] **Concurrency & Overlap:** Book a 120-minute Bridal Makeup slot and verify that adjacent overlapping 30-minute intervals are locked out.
+
+---
+
+## 10. Current Limitations & Assumptions
+
+1. **Single-Chair Capacity:** The salon operates on a single chair capacity model (one client appointment at any given time). Parallel multi-chair booking is not configured.
+2. **Mock SMS Notifications:** Confirmations and billing statements are presented on-screen and printable; integration with external SMS aggregators (e.g., Twilio) is not bundled.
+3. **Weekly Tuesday Closure:** The salon is closed on Tuesdays; slots on Tuesdays are automatically marked unavailable.

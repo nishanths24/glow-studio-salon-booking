@@ -13,11 +13,38 @@ import { adminAuth } from "./middleware/adminAuth.js";
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
+
+  const allowedOrigins = (config.corsOrigin || "")
+    .split(",")
+    .map((s) => s.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+
   app.use(
     cors({
-      origin: config.corsOrigin.split(",").map((s) => s.trim()),
+      origin: (origin, callback) => {
+        // Allow requests with no origin (e.g. server-to-server health checks, curl)
+        if (!origin) return callback(null, true);
+        const normalized = origin.replace(/\/+$/, "");
+        if (allowedOrigins.includes(normalized) || allowedOrigins.includes("*")) {
+          return callback(null, true);
+        }
+        // Allow Vercel preview deployments matching the configured Vercel app domain
+        const isVercelAllowed = allowedOrigins.some((allowed) => {
+          if (allowed.includes(".vercel.app") && normalized.endsWith(".vercel.app")) {
+            const allowedPrefix = allowed.replace(/^https?:\/\//, "").replace(/\.vercel\.app$/, "").split("-")[0];
+            const normalizedPrefix = normalized.replace(/^https?:\/\//, "").replace(/\.vercel\.app$/, "").split("-")[0];
+            return allowedPrefix && allowedPrefix === normalizedPrefix;
+          }
+          return false;
+        });
+        if (isVercelAllowed) {
+          return callback(null, true);
+        }
+        return callback(null, false);
+      },
       credentials: true,
       allowedHeaders: ["Content-Type", "X-Admin-Passcode"],
+      methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     })
   );
   app.use(express.json({ limit: "32kb" }));

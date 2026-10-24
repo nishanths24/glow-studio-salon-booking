@@ -28,7 +28,12 @@ async function withDayLock(date, fn) {
 }
 
 function mapPgError(err) {
-  if (err && (err.code === "23505" || /unique|uniq_active_slot/i.test(err.message || ""))) {
+  if (
+    err &&
+    (err.code === "23505" ||
+      err.code === "23P01" ||
+      /unique|uniq_active_slot|no_overlap/i.test(err.message || ""))
+  ) {
     const e = new Error("Sorry, that slot was just taken. Please pick another.");
     e.status = 409;
     e.code = "SLOT_TAKEN";
@@ -41,9 +46,14 @@ export async function initDb() {
   const schema = fs.readFileSync(schemaPath, "utf8");
   if (config.databaseUrl) {
     const pg = await import("pg");
+    const isLocal =
+      config.databaseUrl.includes("localhost") || config.databaseUrl.includes("127.0.0.1");
     pgPool = new pg.default.Pool({
       connectionString: config.databaseUrl,
-      ssl: config.databaseUrl.includes("localhost") ? false : { rejectUnauthorized: false },
+      ssl: isLocal ? false : { rejectUnauthorized: false },
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
     });
     mode = "pg";
     for (const stmt of schema.split(";").map((s) => s.trim()).filter(Boolean)) {
